@@ -57,9 +57,6 @@ RE_COPY_SRC_ALT = re.compile(
 RE_SIZE_READ = re.compile(r"\*\(int \*\)\(qword_([0-9A-Fa-f]+)\s*\+\s*(\d+)\)")
 # 解密循环特征
 RE_XORSHIFT = re.compile(r"<<\s*13")
-RE_DECRYPT_GUARD = re.compile(r"while\s*\([^)]*\)\s*;")
-# 未展开拷贝（header 拷贝）
-RE_OWORD = re.compile(r"_OWORD")
 
 
 def _norm_hex(text: str) -> int:

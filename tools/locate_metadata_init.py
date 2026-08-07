@@ -22,7 +22,6 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 import sys
 from pathlib import Path
@@ -31,7 +30,6 @@ try:  # 是否在 IDA 内
     import ida_hexrays
     import ida_lines
     import ida_segment
-    import ida_xref
     import idaapi
     import idautils
     import ida_bytes
@@ -40,7 +38,7 @@ try:  # 是否在 IDA 内
     INSIDE_IDA = True
 except ImportError:
     INSIDE_IDA = False
-    idaapi = idautils = ida_bytes = ida_funcs = ida_hexrays = ida_xref = ida_lines = ida_segment = None
+    idaapi = idautils = ida_bytes = ida_funcs = ida_hexrays = ida_lines = ida_segment = None
 
 from report import Report
 
@@ -55,14 +53,6 @@ RE_IMM64 = re.compile(r"=\s*0x[0-9A-Fa-f]{12,16}")
 RE_TABLE = re.compile(r"byte_([0-9A-Fa-f]+)\[")
 # 反编译文本中的全局赋值：qword_XXXX = ...（函数写入的全局）
 RE_GLOBAL_WRITE = re.compile(r"\b(qword|dword)_([0-9A-Fa-f]{4,16})\s*=\s*(?!.*\(__int64\)\s*v\d+)")
-
-
-def _repo_dir() -> Path:
-    env = os.environ.get("LIMBUS_RECOVERY_REPO")
-    if env:
-        return Path(env)
-    here = Path(__file__).resolve().parent if "__file__" in globals() else Path.cwd()
-    return here.parent if here.name == "tools" else here
 
 
 # ------------------------------------------------------------- 粗筛
