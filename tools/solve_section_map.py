@@ -493,26 +493,32 @@ def main() -> int:
     solution = solve(metadata, profile, reference, rep)
 
     if solution:
-        entries, _layout, table = decrypt_header(metadata, profile)
-        rebuilt = rebuild_standard(metadata, entries, table, solution,
-                                   reference["version"])
-        actual_sha = hashlib.sha256(rebuilt).hexdigest().upper()
-        expect_sha = args.expect_sha256.upper()
-        rep.gate("相 4 重建 SHA-256",
-                 not expect_sha or actual_sha == expect_sha,
-                 f"{actual_sha}" + (f" == {expect_sha}" if expect_sha else ""))
-        sanity, version = struct.unpack_from("<II", rebuilt, 0)
-        rep.gate("重建 sanity/version",
-                 sanity == METADATA_SANITY and version == reference["version"],
-                 f"sanity={sanity:#x} version={version}")
-        if args.rebuild_output:
-            args.rebuild_output.parent.mkdir(parents=True, exist_ok=True)
-            args.rebuild_output.write_bytes(rebuilt)
-    rep.set_section("rebuild", {
-        "size": len(rebuilt),
-        "sha256": actual_sha,
-        "output": str(args.rebuild_output) if args.rebuild_output else None,
-    })
+        missing_names = [n for n in STANDARD_NAMES
+                         if n not in solution.get("sections", {})]
+        if missing_names:
+            rep.gate("相 4 重建前提（31 节齐全）", False,
+                     f"missing={missing_names}")
+        else:
+            entries, _layout, table = decrypt_header(metadata, profile)
+            rebuilt = rebuild_standard(metadata, entries, table, solution,
+                                       reference["version"])
+            actual_sha = hashlib.sha256(rebuilt).hexdigest().upper()
+            expect_sha = args.expect_sha256.upper()
+            rep.gate("相 4 重建 SHA-256",
+                     not expect_sha or actual_sha == expect_sha,
+                     f"{actual_sha}" + (f" == {expect_sha}" if expect_sha else ""))
+            sanity, version = struct.unpack_from("<II", rebuilt, 0)
+            rep.gate("重建 sanity/version",
+                     sanity == METADATA_SANITY and version == reference["version"],
+                     f"sanity={sanity:#x} version={version}")
+            if args.rebuild_output:
+                args.rebuild_output.parent.mkdir(parents=True, exist_ok=True)
+                args.rebuild_output.write_bytes(rebuilt)
+            rep.set_section("rebuild", {
+                "size": len(rebuilt),
+                "sha256": actual_sha,
+                "output": str(args.rebuild_output) if args.rebuild_output else None,
+            })
 
     # 独立 section_map.json（apply_profile 消费）
     section_map_path = args.out_dir / f"{args.name}-section-map.json"
