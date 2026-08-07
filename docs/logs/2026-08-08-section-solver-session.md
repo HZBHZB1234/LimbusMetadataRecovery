@@ -48,10 +48,20 @@
    （最小边界 ≥ logical）精确复现人工 profile 的两个 adj（328/9948），C4 校验
    兜底。若未来版本不满足，进入 requires_review 而非硬失败。
 
-## 四、遗留（后续工作）
+## 四、apply 提升闭环（同日追加）
 
-1. `--apply` 提升：candidate_profile + section_map → 正式 profile（含
-   `standard_sections`/`protected_sections`/`metadata_size`/`metadata_sha256`）。
-2. 跨版本参考验证：用 07-30 标准文件作参考解 08-06（验证 C5 漂移容差与 blob
+- `tools/apply_profile.py`：candidate_profile + section-map → 正式 profile
+  （header/substitution_table_hex/protected_sections/standard_sections/
+  metadata_size/metadata_sha256，`identified_as` 由结构门自动分类）。
+- 自检：用生成 profile 重建 v39 → SHA 精确命中 `73194A...57A2E7`。
+- 关键验证：主工作区 `tools/metadata_probe.py`（规范消费者）直接读取生成
+  profile → 重建 43,667,903 B、SHA 命中、31 节、零告警。
+- `solve_section_map.py` 增加独立 `*-section-map.json` 产物（apply 的输入）。
+- 修复：`decrypt_header` 返回布局名（字符串），`list()` 拆字符 → 用
+  `LAYOUTS[layout_name]`；`classify_section` 返回元组需取 kind。
+
+## 五、遗留（后续工作）
+
+1. 跨版本参考验证：用 07-30 标准文件作参考解 08-06（验证 C5 漂移容差与 blob
    size 匹配失效时的退化路径）；下个真实版本验证定位门/提取正则。
-3. 求解器产出 `section_map.json` 独立文件（当前嵌入 report sections）。
+2. 定位器/提取器/求解器的健壮性在下个真实版本（09-xx）上验证，预期需要小调。

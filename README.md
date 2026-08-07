@@ -20,6 +20,7 @@
 | 提取器 | `tools/extract_decrypt_params.py` | 反编译文本正则提取 header/seed/table/section 参数 |
 | 验证闭环 | `tools/candidate_verify.py` | 参数级验证：布局判定、节段解密、结构门 |
 | 映射求解器 | `tools/solve_section_map.py` | 31 段映射自动求解：C1 记录大小 + C5 内容指纹 + C3 链装配 + 相 4 重建验证 |
+| profile 提升 | `tools/apply_profile.py` | candidate + section_map → 正式 profile（自检重建 SHA） |
 | 求解器设计 | `docs/DESIGN_SECTION_SOLVER.md` | 31 段映射求解器设计文档（已实现，验收见下） |
 
 ## 回归结果（08-06 真实 IDB，端到端）
@@ -30,6 +31,7 @@
 | 提取器 | header_size 1044、header_seed `0xBC41EAFC33962B00`、表 `0x187356110`、7 节参数与 `profiles/steam-2026-08-06.json` 逐项一致（66 项夹具断言全过） |
 | 验证闭环 | 布局自动判定 `offset_size_count`（87 三元组）；7/7 节段解密通过结构门（string 94.8%、stringLiteralData 96.2% 可打印，stringLiteral 单调 1.0）；裁决 **PASS** |
 | 映射求解器 | 22 非加密节指纹定位 ratio=1.0；7 加密节由"指纹必然失败"识别 + extractor 参数；零尺寸节 snap 链边界；**31 节映射与 profile 逐项一致**（entry+adj 全同），重建 SHA-256 == `73194A...57A2E7`，`requires_review == 0`，裁决 **PASS** |
+| profile 提升 | apply_profile 生成正式 profile，主工作区 `metadata_probe.py` 直接消费：重建 43,667,903 B、SHA 精确命中、31 节、零告警 |
 
 07-30 提取器夹具（`tests/fixtures/metadata_initialize_current.c`）33 项断言全过。
 
@@ -62,9 +64,9 @@ extract_decrypt_params.py → candidate_profile.json
         ↓
 candidate_verify.py → 裁决 PASS / PASS_WITH_REVIEW / FAIL + report
         ↓
-solve_section_map.py → section_map.json + 标准 v39 重建文件
+solve_section_map.py → *-section-map.json + 标准 v39 重建文件
         ↓
-（审核后 --apply 提升为正式 profile）
+apply_profile.py → 正式 profile（metadata_probe.py 可直接消费）
 ```
 
 每个步骤都产出机器可读 JSON 与人类/LLM 可读 Markdown 报告；需要人工判断的歧义项进入 `requires_review` 清单，不静默失败。

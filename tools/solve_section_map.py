@@ -508,11 +508,24 @@ def main() -> int:
         if args.rebuild_output:
             args.rebuild_output.parent.mkdir(parents=True, exist_ok=True)
             args.rebuild_output.write_bytes(rebuilt)
-        rep.set_section("rebuild", {
-            "size": len(rebuilt),
-            "sha256": actual_sha,
-            "output": str(args.rebuild_output) if args.rebuild_output else None,
-        })
+    rep.set_section("rebuild", {
+        "size": len(rebuilt),
+        "sha256": actual_sha,
+        "output": str(args.rebuild_output) if args.rebuild_output else None,
+    })
+
+    # 独立 section_map.json（apply_profile 消费）
+    section_map_path = args.out_dir / f"{args.name}-section-map.json"
+    section_map_path.write_text(json.dumps({
+        "profile_id": profile.get("profile_id", ""),
+        "layout": solution.get("layout"),
+        "protected": {
+            name: {"entry_index": v["entry_index"], "adj": v["adj"], "seed": v["seed"]}
+            for name, v in solution.get("protected", {}).items()},
+        "sections": solution["sections"],
+        "evidence": solution.get("evidence", {}),
+    }, indent=2, ensure_ascii=False), encoding="utf-8")
+    rep.set_section("section_map", {"output": str(section_map_path)})
 
     rep.write_all(args.out_dir, args.name)
     print(f"verdict: {rep.verdict()}")

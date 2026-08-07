@@ -79,6 +79,34 @@ def main() -> int:
         "sha256": actual_sha,
         "rebuilt": str(out_path),
     })
+
+    # ---- apply 提升闭环：生成正式 profile 并自检重建 --------------------
+    sys.path.insert(0, str(REPO / "tools"))
+    from apply_profile import build_profile
+    from solve_section_map import parse_reference as _pr
+    generated = build_profile(metadata, candidate, solution, reference,
+                              "steam-2026-08-06")
+    from solve_section_map import rebuild_standard as _rs, decrypt_header as _dh
+    gen_entries, _l, gen_table = _dh(metadata, candidate)
+    gen_solution = {
+        "sections": {s["name"]: {"custom_entry_index": s["custom_entry_index"],
+                                 "physical_offset_adjustment": s["physical_offset_adjustment"]}
+                     for s in generated["standard_sections"]},
+        "protected": {p["name"]: {"seed": p["seed"]}
+                      for p in generated["protected_sections"]},
+    }
+    gen_rebuilt = _rs(metadata, gen_entries, gen_table, gen_solution, reference["version"])
+    gen_sha = hashlib.sha256(gen_rebuilt).hexdigest().upper()
+    rep.gate("apply 生成 profile 自检 SHA-256", gen_sha == EXPECT_SHA,
+             f"{gen_sha} == {EXPECT_SHA}")
+    gen_path = OUT_DIR / "steam-2026-08-06.generated.json"
+    gen_path.write_text(json.dumps(generated, indent=1, ensure_ascii=False),
+                        encoding="utf-8")
+    rep.gate("apply profile 字段",
+             all(k in generated for k in ("header", "substitution_table_hex",
+                                          "protected_sections", "standard_sections",
+                                          "metadata_size", "metadata_sha256")),
+             f"output={gen_path}")
     rep.write_all(OUT_DIR, "regression-08-06")
 
     ok = not mismatches and actual_sha == EXPECT_SHA
