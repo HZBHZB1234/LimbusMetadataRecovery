@@ -35,15 +35,21 @@ RE_ANY_IMM = re.compile(r"=\s*(0x[0-9A-Fa-f]+|\d+)")
 RE_TABLE = re.compile(r"byte_([0-9A-Fa-f]+)\[")
 # 文件基址/header 基址全局（qword_XXXX = (__int64)vN 形式）
 RE_GLOBAL_ASSIGN = re.compile(r"(qword|dword)_([0-9A-Fa-f]+)\s*=\s*\(__int64\)\s*v\d+")
-# malloc 调用（字面量大小，可能带 u/L 后缀；hex 分支必须在前）
-RE_MALLOC = re.compile(r"j__malloc_base\(\s*(0x[0-9A-Fa-f]+u?l?l?|\d+)")
+# malloc/分配调用（字面量大小，可能带 u/L 后缀；hex 分支必须在前）
+# 07-30 为 j__malloc_base，08-06 为 sub_18072F980（内联分配器）
+RE_MALLOC = re.compile(r"(?:j__malloc_base|sub_[0-9A-Fa-f]{4,16})\(\s*(0x[0-9A-Fa-f]+u?l?l?|\d+)")
 # header 字段读取（size 字段）：*(int *)(qword_XXXX + N)
 RE_FIELD_READ = re.compile(r"\*\(int \*\)\(qword_([0-9A-Fa-f]+)\s*\+\s*(\d+)\)")
-# memmove 源表达式（核心模式）：
+# 拷贝源表达式（核心模式，拷贝调用独有形态，不带前缀避免误匹配函数声明）：
 #   qword_<file> + *(_DWORD *)(qword_<hdr> + <off>) ± <adj>
-RE_MEMMOVE_SRC = re.compile(
-    r"memmove\s*\(.*?"
+RE_COPY_SRC = re.compile(
     r"qword_([0-9A-Fa-f]+)\s*\+\s*\*\(_DWORD \*\)\s*\(qword_([0-9A-Fa-f]+)\s*\+\s*(\d+)\)"
+    r"\s*([+-])\s*(\d+)",
+    re.DOTALL,
+)
+# 08-06 变体：qword_<file> + *(_DWORD *)qword_<hdr> ± <adj>（offset 字段为 header 0 处）
+RE_COPY_SRC_ALT = re.compile(
+    r"qword_([0-9A-Fa-f]+)\s*\+\s*\*\(_DWORD \*\)\s*qword_([0-9A-Fa-f]+)"
     r"\s*([+-])\s*(\d+)",
     re.DOTALL,
 )
@@ -128,35 +134,58 @@ def extract_from_text(text: str, func_addr: str = "") -> Extraction:
     else:
         ext.errors.append("未找到 xorshift 循环特征（<< 13）")
 
-    # ---- 节块：memmove 源 + 后续 seed ---------------------------------
-    for match in RE_MEMMOVE_SRC.finditer(text):
-        file_base_hex, hdr_base_hex, off_text, sign, adj_text = match.groups()
-        offset_off = int(off_text)
+    # ---- 节块：拷贝调用源 + 后续 seed ----------------------------------
+    def _section_from_copy(match, src) -> dict | None:
+        """从拷贝调用提取节块参数。src 为匹配到的拷贝表达式。"""
+        if src.lastindex == 5:
+            file_base_hex, hdr_base_hex, off_text, sign, adj_text = src.groups()
+            offset_off = int(off_text)
+        else:
+            file_base_hex, hdr_base_hex, sign, adj_text = src.groups()
+            offset_off = 0
         adj = int(adj_text)
         if sign == "-":
             adj = -adj
-        # size_off：同一节块内 memmove 长度参数（*(int *)(qword_<hdr> + N)）
-        block_start = text.rfind("j__malloc_base", 0, match.start())
+        block_start = max(
+            text.rfind("j__malloc_base", 0, match.start()),
+            text.rfind("sub_18072F980", 0, match.start()),
+        )
         if block_start < 0:
-            block_start = match.start() - 400
+            block_start = match.start() - 500
         window_text = text[block_start:min(match.end() + 300, len(text))]
         size_off = _find_size_offset(window_text)
-        # seed：memmove 结束到下一个 memmove 之间（或节块尾部）的 64 位立即数
-        next_memmove = text.find("memmove", match.end())
-        tail_end = next_memmove if next_memmove > 0 else match.end() + 1200
+        next_src = RE_COPY_SRC.search(text, match.end() + 1)
+        if next_src is None:
+            next_src = RE_COPY_SRC_ALT.search(text, match.end() + 1)
+        tail_end = next_src.start() if next_src else match.end() + 1200
         tail = text[match.end():tail_end]
         seed = None
         for smatch in RE_IMM64.finditer(tail):
             seed = _norm_hex(smatch.group(1))
             break
-        section = {
+        return {
             "size_off": size_off,
             "offset_off": offset_off,
             "adj": adj,
             "seed": None if seed is None else f"0x{seed:X}",
         }
+
+    for match in RE_COPY_SRC.finditer(text):
+        section = _section_from_copy(match, match)
+        if section is None:
+            continue
         ext.sections.append(section)
-        _evidence(ext, lines, match.start(), f"节块 size_off={size_off} offset_off={offset_off} adj={adj} seed={section['seed']}")
+        _evidence(ext, lines, match.start(),
+                  f"节块 size_off={section['size_off']} offset_off={section['offset_off']} "
+                  f"adj={section['adj']} seed={section['seed']}")
+    for match in RE_COPY_SRC_ALT.finditer(text):
+        section = _section_from_copy(match, match)
+        if section is None:
+            continue
+        ext.sections.append(section)
+        _evidence(ext, lines, match.start(),
+                  f"节块(alt) size_off={section['size_off']} offset_off={section['offset_off']} "
+                  f"adj={section['adj']} seed={section['seed']}")
 
     # ---- 一致性检查 ----------------------------------------------------
     if ext.sections:
@@ -233,13 +262,16 @@ def main() -> int:
     parser.add_argument("--text", type=Path, help="反编译文本文件（- 表示 stdin）")
     parser.add_argument("--addr", default="", help="函数地址（仅报告用）")
     parser.add_argument("--version", default="", help="版本标识")
+    parser.add_argument("--table-hex", default="", help="替换表 256 字节 hex（来自定位器 dump）")
     parser.add_argument("--out-dir", type=Path, default=Path("out"))
     parser.add_argument("--name", default="candidate_profile", help="输出名")
-    parser.add_argument("--fixture-test", action="store_true", help="对 07-30 夹具执行 TDD")
+    parser.add_argument("--fixture-test", action="store_true", help="对 07-30/08-06 夹具执行 TDD")
     args = parser.parse_args()
 
     if args.fixture_test:
-        return _fixture_test()
+        rc = _fixture_test()
+        rc2 = _fixture_test_08_06()
+        return 0 if (rc == 0 and rc2 == 0) else 1
 
     if args.text is None or str(args.text) == "-":
         text = sys.stdin.read()
@@ -255,6 +287,8 @@ def main() -> int:
         "extracted_from": args.addr,
         **ext.to_dict(),
     }
+    if args.table_hex:
+        profile["table_hex"] = args.table_hex
     (args.out_dir / f"{args.name}.json").write_text(
         json.dumps(profile, indent=2, ensure_ascii=False), encoding="utf-8")
     print(f"verdict: {rep.verdict()}")
@@ -303,6 +337,50 @@ def _fixture_test() -> int:
         print("errors:", ext.errors)
         return 1
     print(f"fixture-test OK（{len(checks)} 项）")
+    return 0
+
+
+def _fixture_test_08_06() -> int:
+    """08-06 真值回归：profiles/steam-2026-08-06.json 已知参数。"""
+    fixture = Path(__file__).resolve().parent.parent / "tests" / "fixtures" / "metadata_initialize_08-06.c"
+    text = fixture.read_text(encoding="utf-8")
+    ext = extract_from_text(text, "sub_18069C5E0")
+
+    checks = {
+        "header_size == 1044": ext.header_size == 1044,
+        "header_seed == 0xBC41EAFC33962B00": ext.header_seed == 0xBC41EAFC33962B00,
+        "table == 0x187356110": ext.table_addr == "0x187356110",
+        "sections == 7": len(ext.sections) == 7,
+        "no errors": not ext.errors,
+    }
+
+    expected_sections = [
+        (1024, 1020, -1508, 0x116C4B46EACABA5),
+        (664, 660, 3476, 0xD4C07427B74C818E),
+        (964, 960, -6696, 0xAFDAE7074F40F834),
+        (136, 132, 4304, 0xA28BFC303CE665BA),
+        (592, 588, -3984, 0xFF3532DDAC34BA66),
+        (652, 648, -7080, 0x1DFCEDD20A3EE02C),
+        (4, 0, 2268, 0x88942C9716431E06),
+    ]
+    for idx, (size_off, offset_off, adj, seed) in enumerate(expected_sections):
+        got = ext.sections[idx]
+        got_seed = int(got["seed"], 16) if got["seed"] else None
+        checks[f"s[{idx}] size_off={size_off}"] = got["size_off"] == size_off
+        checks[f"s[{idx}] offset_off={offset_off}"] = got["offset_off"] == offset_off
+        checks[f"s[{idx}] adj={adj}"] = got["adj"] == adj
+        checks[f"s[{idx}] seed=0x{seed:X}"] = got_seed == seed
+
+    print("\n== 08-06 夹具 ==")
+    failed = [name for name, ok in checks.items() if not ok]
+    for name, ok in checks.items():
+        print(f"[{'PASS' if ok else 'FAIL'}] {name}")
+    if failed:
+        print("FAILED:", *failed, sep="\n  ")
+        print("errors:", ext.errors)
+        print("sections:", json.dumps(ext.sections, ensure_ascii=False))
+        return 1
+    print(f"08-06 fixture-test OK（{len(checks)} 项）")
     return 0
 
 
