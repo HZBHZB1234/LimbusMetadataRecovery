@@ -21,6 +21,16 @@
 | 验证闭环 | `tools/candidate_verify.py` | 参数级验证：布局判定、节段解密、结构门 |
 | 求解器设计 | `docs/DESIGN_SECTION_SOLVER.md` | 31 段映射求解器设计文档（实现为后续阶段） |
 
+## 回归结果（08-06 真实 IDB，端到端）
+
+| 阶段 | 结果 |
+| --- | --- |
+| 定位器 | top-1 = `sub_18069C5E0`（真值 init）；score 161.0，fanout 330 |
+| 提取器 | header_size 1044、header_seed `0xBC41EAFC33962B00`、表 `0x187356110`、7 节参数与 `profiles/steam-2026-08-06.json` 逐项一致（66 项夹具断言全过） |
+| 验证闭环 | 布局自动判定 `offset_size_count`（87 三元组）；7/7 节段解密通过结构门（string 94.8%、stringLiteralData 96.2% 可打印，stringLiteral 单调 1.0）；裁决 **PASS** |
+
+07-30 提取器夹具（`tests/fixtures/metadata_initialize_current.c`）33 项断言全过。
+
 ## 参考基线
 
 - 08-06 构建真值：init `sub_18069C5E0`、map `sub_180693580`、替换表 RVA `0x7354910`（IDB：主工作区 `samples/steam-2026-08-06/GameAssembly.dll.i64`）。
