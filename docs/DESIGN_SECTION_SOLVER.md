@@ -1,5 +1,10 @@
 # 31 段映射求解器设计文档
 
+> **实现状态：已实现（2026-08-08）**。`tools/solve_section_map.py` 落地，08-06 端到端
+> 验收通过：31 节映射与 profile 逐项一致、重建 SHA-256 精确命中
+> `73194A637E4BEF48F5D0396158F2CFEEAC484EFF4864AE01F6CDAE603057A2E7`、
+> `requires_review == 0`。回归入口：`tests/run_solver_regression.py`。
+
 本文是"自动恢复 metadata 解密参数"流水线的下一阶段设计：给定解密后的自定义 header
 （N 个三元组）与解密参数（header seed/替换表/7 个受保护节段 seed），**自动把 31 个
 真实 section 映射到标准 v39 metadata 字段，并闭合物理偏移修正（adj）**。
@@ -108,7 +113,7 @@
 ## 6. 接口与组件
 
 ```
-tools/solve_section_map.py        # 本设计实现（下一阶段）
+tools/solve_section_map.py        # 本设计实现（已交付，2026-08-08 验收 PASS）
   输入：candidate_profile.json（提取器）+ 加密 metadata + 参考标准文件
   输出：section_map.json（31 节映射）+ report.json/md
 tools/metadata_probe.py           # 主工作区复用（重建/验证）
