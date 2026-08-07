@@ -1,0 +1,16 @@
+# 运行时生成物
+__pycache__/
+*.pyc
+
+# 输出与临时文件
+out/
+tmp/
+*.candidate.json.tmp
+
+# 大型分析产物不入库（保留在主工作区归档）
+analysis/
+samples/
+*.i64
+
+# 本地配置
+*.local.json
