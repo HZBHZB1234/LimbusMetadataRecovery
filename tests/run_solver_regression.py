@@ -9,6 +9,7 @@
 """
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -19,7 +20,7 @@ from solve_section_map import solve
 from report import Report
 
 EXPECT_SHA = "73194A637E4BEF48F5D0396158F2CFEEAC484EFF4864AE01F6CDAE603057A2E7"
-MAIN = Path(r"E:\desktop\work\LimbusDecompile")
+MAIN = Path(os.environ.get("LIMBUS_MAIN_DIR", r"E:\desktop\work\LimbusDecompile"))
 METADATA = MAIN / "samples" / "steam-2026-08-06" / "global-metadata.dat"
 CANDIDATE = REPO / "out" / "candidate_profile_08_06.json"
 REFERENCE = MAIN / "analysis" / "global-metadata-standard-steam-2026-08-06.dat"
