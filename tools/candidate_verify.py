@@ -33,6 +33,7 @@ UINT64_MASK = (1 << 64) - 1
 LAYOUTS = {
     "offset_size_count": ["offset", "size", "count"],
     "size_count_offset": ["size", "count", "offset"],
+    "count_offset_size": ["count", "offset", "size"],
 }
 
 
@@ -151,9 +152,16 @@ def verify_profile(metadata: bytes, profile: dict, out_dir: Path, name: str) -> 
         offset_off = sec.get("offset_off")
         adj = sec.get("adj", 0)
         seed = sec.get("seed")
-        entry = entries[size_off // 12] if size_off is not None and size_off // 12 < len(entries) else None
-        size = entry["size"] if entry else None
-        logical = entry["offset"] if entry else None
+        # 优先按 profile 显式偏移直接读字段（二进制 memmove 语义，08-13 起
+        # 三元组字段序变为 count/offset/size，字段不再对齐 entry 起点）；
+        # offset 字段为有符号（08-13 节块 offset 可为负），故用 '<i' 读取。
+        if size_off is not None and offset_off is not None:
+            size = struct.unpack_from("<i", header, size_off)[0]
+            logical = struct.unpack_from("<i", header, offset_off)[0]
+        else:
+            entry = entries[size_off // 12] if size_off is not None and size_off // 12 < len(entries) else None
+            size = entry["size"] if entry else None
+            logical = entry["offset"] if entry else None
         physical = (logical + adj) if (logical is not None and adj is not None) else None
 
         result = {

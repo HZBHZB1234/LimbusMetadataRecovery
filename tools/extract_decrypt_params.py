@@ -36,8 +36,12 @@ RE_TABLE = re.compile(r"byte_([0-9A-Fa-f]+)\[")
 # 文件基址/header 基址全局（qword_XXXX = (__int64)vN 形式）
 RE_GLOBAL_ASSIGN = re.compile(r"(qword|dword)_([0-9A-Fa-f]+)\s*=\s*\(__int64\)\s*v\d+")
 # malloc/分配调用（字面量大小，可能带 u/L 后缀；hex 分支必须在前）
-# 07-30 为 j__malloc_base，08-06 为 sub_18072F980（内联分配器）
-RE_MALLOC = re.compile(r"(?:j__malloc_base|sub_[0-9A-Fa-f]{4,16})\(\s*(0x[0-9A-Fa-f]+u?l?l?|\d+)")
+# 07-30 为 j__malloc_base，08-06 为 sub_18072F980，08-13 起为函数指针强转
+# 后的间接调用形态（((__int64 (__fastcall *)(__int64))sub_18072F9A0)(1236)），
+# 即 callee 与 '(' 之间可能隔一个 ')'，故用可选的 \) 兼容两代形态。
+RE_MALLOC = re.compile(r"(?:j__malloc_base|sub_[0-9A-Fa-f]{4,16})\s*\)?\(\s*(0x[0-9A-Fa-f]+u?l?l?|\d+)")
+# 分配调用起点（节块窗口锚点，版本无关）：callee 名 + 可选 ')' + '('
+RE_ALLOC_START = re.compile(r"(?:j__malloc_base|sub_[0-9A-Fa-f]{4,16})\s*\)?\(")
 # header 字段读取（size 字段）：*(int *)(qword_XXXX + N)
 RE_FIELD_READ = re.compile(r"\*\(int \*\)\(qword_([0-9A-Fa-f]+)\s*\+\s*(\d+)\)")
 # 拷贝源表达式（核心模式，拷贝调用独有形态，不带前缀避免误匹配函数声明）：
@@ -143,11 +147,10 @@ def extract_from_text(text: str, func_addr: str = "") -> Extraction:
         adj = int(adj_text)
         if sign == "-":
             adj = -adj
-        block_start = max(
-            text.rfind("j__malloc_base", 0, match.start()),
-            text.rfind("sub_18072F980", 0, match.start()),
-        )
-        if block_start < 0:
+        alloc_hits = list(RE_ALLOC_START.finditer(text, 0, match.start()))
+        if alloc_hits:
+            block_start = alloc_hits[-1].start()
+        else:
             block_start = match.start() - 500
         window_text = text[block_start:min(match.end() + 300, len(text))]
         size_off = _find_size_offset(window_text)
@@ -268,7 +271,8 @@ def main() -> int:
     if args.fixture_test:
         rc = _fixture_test()
         rc2 = _fixture_test_08_06()
-        return 0 if (rc == 0 and rc2 == 0) else 1
+        rc3 = _fixture_test_08_13()
+        return 0 if (rc == 0 and rc2 == 0 and rc3 == 0) else 1
 
     if args.text is None or str(args.text) == "-":
         text = sys.stdin.read()
@@ -378,6 +382,53 @@ def _fixture_test_08_06() -> int:
         print("sections:", json.dumps(ext.sections, ensure_ascii=False))
         return 1
     print(f"08-06 fixture-test OK（{len(checks)} 项）")
+    return 0
+
+
+def _fixture_test_08_13() -> int:
+    """08-13 真值回归：分配调用为强转间接形态
+    （((__int64 (__fastcall *)(__int64))sub_18072F9A0)(1236)），
+    验证 header_size 提取对 ')(1236)' 形态的兼容。"""
+    fixture = Path(__file__).resolve().parent.parent / "tests" / "fixtures" / "metadata_initialize_08-13.c"
+    text = fixture.read_text(encoding="utf-8")
+    ext = extract_from_text(text, "sub_18069C5E0")
+
+    checks = {
+        "header_size == 1236 (0x4D4)": ext.header_size == 1236,
+        "header_seed == 0x30FBE73A8992293E": ext.header_seed == 0x30FBE73A8992293E,
+        "table == 0x187355000": ext.table_addr == "0x187355000",
+        "sections == 7": len(ext.sections) == 7,
+        "xorshift_loops == 52": ext.xorshift_loops == 52,
+        "no errors": not ext.errors,
+    }
+
+    expected_sections = [
+        (452, 448, -6512, 0xCD371567CB7722AA),
+        (416, 412, 7336, 0xCA335BE4CCB9844),
+        (1004, 1000, -7500, 0xC5306267CEF471C8),
+        (1232, 1228, -2268, 0xD2FB2F77402CAFDD),
+        (704, 700, 4468, 0xDC5E21DDF0866AE3),
+        (1016, 1012, 1040, 0x1927ACB4476B3A93),
+        (116, 112, -7948, 0xDFAF6B0F88AF8314),
+    ]
+    for idx, (size_off, offset_off, adj, seed) in enumerate(expected_sections):
+        got = ext.sections[idx]
+        got_seed = int(got["seed"], 16) if got["seed"] else None
+        checks[f"s[{idx}] size_off={size_off}"] = got["size_off"] == size_off
+        checks[f"s[{idx}] offset_off={offset_off}"] = got["offset_off"] == offset_off
+        checks[f"s[{idx}] adj={adj}"] = got["adj"] == adj
+        checks[f"s[{idx}] seed=0x{seed:X}"] = got_seed == seed
+
+    print("\n== 08-13 夹具 ==")
+    failed = [name for name, ok in checks.items() if not ok]
+    for name, ok in checks.items():
+        print(f"[{'PASS' if ok else 'FAIL'}] {name}")
+    if failed:
+        print("FAILED:", *failed, sep="\n  ")
+        print("errors:", ext.errors)
+        print("sections:", json.dumps(ext.sections, ensure_ascii=False))
+        return 1
+    print(f"08-13 fixture-test OK（{len(checks)} 项）")
     return 0
 
 

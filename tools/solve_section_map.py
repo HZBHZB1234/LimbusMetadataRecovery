@@ -48,6 +48,7 @@ MIN_RATIO = 0.9
 LAYOUTS = {
     "offset_size_count": ["offset", "size", "count"],
     "size_count_offset": ["size", "count", "offset"],
+    "count_offset_size": ["count", "offset", "size"],
 }
 
 # 标准 v39 的 31 节规范顺序（跨版本稳定）

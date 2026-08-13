@@ -139,7 +139,9 @@ def fine_features(func_ea: int, text: str, string_score: int) -> dict:
     f = {
         "xorshift_loops": len(re.findall(r"<<\s*13", text)),
         "memmove": len(re.findall(r"memmove\s*\(", text)),
-        "malloc": len(re.findall(r"j__malloc_base\s*\(", text)),
+        "malloc": len(re.findall(
+            r"(?:j__malloc_base|sub_[0-9A-Fa-f]{4,16})\s*\)?\s*\(\s*(?:0x[0-9A-Fa-f]+|\d+|\*)",
+            text)),
         "imm64": len(RE_IMM64.findall(text)),
         "oword": len(re.findall(r"_OWORD", text)),
         "table_ref": len(RE_TABLE.findall(text)),
